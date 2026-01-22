@@ -1,0 +1,851 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI分镜提示词生成器</title>
+    <!-- 外部依赖 -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <script src="js/storage-manager.js"></script>
+    <script src="js/shot-types-config.js"></script>
+    <!-- 样式表 -->
+    <link rel="stylesheet" href="css/storyboard-generator.css">
+    <link rel="stylesheet" href="css/task-queue.css">
+</head>
+<body>
+    <div class="container">
+        <h1>🎬 AI分镜提示词生成器</h1>
+        <p class="subtitle">基于 Gemini 多模态AI，智能反推图片场景，生成专业分镜提示词</p>
+
+        <!-- API设置 -->
+        <div class="card collapsible" id="apiSettingsCard">
+            <div class="card-collapse-header" onclick="toggleCardCollapse('apiSettingsCard')">
+                <h2>
+                    🔑 API 设置
+                    <span class="card-collapse-summary" id="apiSettingsSummary"></span>
+                </h2>
+                <div class="collapse-toggle">
+                    <span class="collapse-icon">▼</span>
+                    <span class="collapse-text">折叠</span>
+                </div>
+            </div>
+            <div class="card-collapse-content">
+            <div class="api-settings">
+                <div class="setting-item" style="flex: 2; min-width: 280px;">
+                    <label>API Base URL (文本/图片)</label>
+                    <input type="text" id="apiBaseUrl" value="https://api.bltcy.ai/v1" placeholder="输入API Base URL...">
+                </div>
+                <div class="setting-item" style="flex: 2; min-width: 280px;">
+                    <label style="display: flex; align-items: center; gap: 8px;">
+                        视频 API Base URL 
+                        <span id="proxyStatus" style="font-size: 11px;"></span>
+                    </label>
+                    <input type="text" id="videoApiBaseUrl" value="https://api.bltcy.ai" placeholder="输入视频API Base URL...">
+                </div>
+                <div class="setting-item api-key-item" style="flex: 2; min-width: 200px;">
+                    <label>API Key</label>
+                    <input type="password" id="apiKey" placeholder="输入您的 API Key...">
+                </div>
+                <div class="setting-item" style="flex: 1; min-width: 160px;">
+                    <label>模型选择</label>
+                    <select id="modelSelect">
+                        <option value="gemini-3-pro-preview">gemini-3-pro-preview</option>
+                        <option value="gemini-2.5-pro-preview-06-05">gemini-2.5-pro-preview</option>
+                        <option value="gemini-2.5-flash-preview-05-20">gemini-2.5-flash-preview</option>
+                        <option value="gemini-2.0-flash">gemini-2.0-flash</option>
+                        <option value="gemini-2.0-flash-lite">gemini-2.0-flash-lite</option>
+                    </select>
+                </div>
+            </div>
+            
+            <!-- 代理和连接状态行 -->
+            <div style="display: flex; align-items: center; gap: 15px; margin-top: 12px; padding: 10px 15px; background: rgba(0,0,0,0.2); border-radius: 8px; flex-wrap: wrap;">
+                <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; color: #ccc; font-size: 13px;">
+                    <input type="checkbox" id="forceProxy" onchange="toggleForceProxy(this.checked)" style="width: 16px; height: 16px;">
+                    <span>🔒 强制使用代理</span>
+                </label>
+                <span style="color: #666;">|</span>
+                <span style="color: #888; font-size: 12px;">
+                    💡 如遇网络问题，运行 <code style="background: rgba(255,255,255,0.1); padding: 2px 6px; border-radius: 3px;">启动代理服务器.bat</code>
+                </span>
+                <div style="flex: 1;"></div>
+                <button class="btn btn-sm btn-primary" onclick="testApiConnection()">🔗 测试连接</button>
+                <div class="api-status disconnected" id="apiStatus">
+                    <span class="status-dot"></span>
+                    <span>未连接</span>
+                </div>
+            </div>
+            
+            <div class="tips" style="margin-top: 12px;">
+                💡 支持 OpenAI 兼容格式的 API，如：<code>https://api.openai.com/v1</code>、<code>https://api.bltcy.ai/v1</code> 等
+                <div style="margin-top: 8px; display: flex; align-items: center; gap: 15px; flex-wrap: wrap;">
+                    <label style="display: flex; align-items: center; gap: 5px; cursor: pointer;">
+                        <input type="checkbox" id="enableCompression" onchange="toggleCompression(this.checked)">
+                        <span>上传时压缩图片（网络不稳定时建议开启）</span>
+                    </label>
+                </div>
+            </div>
+            </div>
+        </div>
+
+        <!-- 分镜参考组 -->
+        <div class="card collapsible" id="refGroupsCard">
+            <div class="card-collapse-header" onclick="toggleCardCollapse('refGroupsCard')">
+                <h2>
+                    📷 分镜参考图
+                    <span class="card-collapse-summary" id="refGroupsSummary"></span>
+                </h2>
+                <div class="collapse-toggle">
+                    <span class="collapse-icon">▼</span>
+                    <span class="collapse-text">折叠</span>
+                </div>
+            </div>
+            <div class="card-collapse-content">
+                <div style="display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 10px;">
+                    <button class="btn btn-sm btn-success" onclick="addRefGroup()">➕ 添加分镜参考</button>
+                    <button class="btn btn-sm btn-warning" onclick="analyzeAllRefGroups()">🤖 AI分析全部</button>
+                    <button class="btn btn-sm btn-danger" onclick="clearAllRefGroups()">🗑️ 清空全部</button>
+                    <span id="processingStatus" style="color: #aaa; font-size: 12px; align-self: center;"></span>
+                </div>
+            
+                <p class="tips" style="margin: 10px 0;" id="refGroupTips">
+                    💡 上传参考图后点击"🤖 AI分析"，AI将根据当前模式和网格布局生成对应数量的镜头描述
+                </p>
+
+                <!-- 快速导航栏（固定在容器外部） -->
+                <div id="refGroupsNav" class="ref-groups-nav" style="display: none;"></div>
+
+                <div class="ref-groups-container" id="refGroupsContainer">
+                    <!-- 分镜参考组将动态生成 -->
+                </div>
+            </div>
+        </div>
+
+        <!-- 基础设置 -->
+        <div class="card collapsible" id="basicSettingsCard">
+            <div class="card-collapse-header" onclick="toggleCardCollapse('basicSettingsCard')">
+                <h2>
+                    ⚙️ 基础设置
+                    <span class="card-collapse-summary" id="basicSettingsSummary"></span>
+                </h2>
+                <div class="collapse-toggle">
+                    <span class="collapse-icon">▼</span>
+                    <span class="collapse-text">折叠</span>
+                </div>
+            </div>
+            <div class="card-collapse-content">
+            
+            <!-- 模式切换 -->
+            <div class="mode-switch-container">
+                <div class="mode-switch">
+                    <button class="mode-btn active" id="modeShot" onclick="switchMode('shot')">
+                        🎬 分镜模式
+                        <span class="mode-desc">同一画面的不同镜头角度</span>
+                    </button>
+                    <button class="mode-btn" id="modeStory" onclick="switchMode('story')">
+                        📖 故事模式
+                        <span class="mode-desc">连续剧情的关键画面</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- 分镜模式提示 -->
+            <div class="mode-tips" id="shotModeTips">
+                💡 <strong>分镜模式</strong>：上传参考图后，AI将根据画面生成不同景别（远景、中景、近景、特写等）的镜头描述，适合电影/广告分镜脚本。
+            </div>
+
+            <!-- 故事模式设置 -->
+            <div class="story-settings" id="storySettings" style="display: none;">
+                <div class="setting-item" style="width: 100%;">
+                    <label>📝 故事设定（帮助AI创作连贯的故事情节）</label>
+                    <textarea id="storyContext" rows="3" placeholder="例如：这是一个关于两个青梅竹马重逢的故事，女主角是一个画家，男主角是归国的音乐家。情绪基调：温馨感人..."></textarea>
+                </div>
+                <div class="story-tips">
+                    💡 <strong>故事模式</strong>：AI将根据参考图+故事设定，创作一个完整故事并拆分为 <strong id="storyFrameCount">9</strong> 个关键画面，画面之间有时间顺序和因果关系。
+                </div>
+            </div>
+
+            <div class="settings-grid">
+                <div class="setting-item">
+                    <label>网格布局</label>
+                    <select id="gridLayout" onchange="onGridLayoutChange()">
+                        <option value="3x3">3×3 (9镜头)</option>
+                        <option value="2x2">2×2 (4镜头)</option>
+                        <option value="2x3">2×3 (6镜头)</option>
+                        <option value="3x2">3×2 (6镜头)</option>
+                        <option value="4x4">4×4 (16镜头)</option>
+                        <option value="4x6">4×6 (24镜头)</option>
+                        <option value="6x4">6×4 (24镜头)</option>
+                        <option value="6x6">6×6 (36镜头)</option>
+                        <option value="1x4">1×4 (4镜头横排)</option>
+                        <option value="4x1">4×1 (4镜头竖排)</option>
+                    </select>
+                </div>
+
+                <div class="setting-item">
+                    <label>分辨率</label>
+                    <select id="resolution">
+                        <option value="8K">8K</option>
+                        <option value="4K">4K</option>
+                        <option value="2K">2K</option>
+                        <option value="1080P">1080P</option>
+                    </select>
+                </div>
+
+                <div class="setting-item">
+                    <label>画幅比例</label>
+                    <select id="aspectRatio">
+                        <option value="16:9">16:9 (宽屏)</option>
+                        <option value="9:16">9:16 (竖屏)</option>
+                        <option value="1:1">1:1 (正方形)</option>
+                        <option value="4:3">4:3 (传统)</option>
+                        <option value="21:9">21:9 (超宽)</option>
+                        <option value="2.35:1">2.35:1 (电影)</option>
+                    </select>
+                </div>
+            </div>
+
+            <!-- 场景/主题描述移到这里，作为可选补充 -->
+            <div class="setting-item" style="margin-top: 15px;">
+                <label>🎭 场景/主题描述（可选，用于补充说明或手动填写）</label>
+                <textarea id="sceneDesc" rows="2" placeholder="可由分镜参考的AI分析自动填充，或手动输入补充说明..."></textarea>
+                <div class="quick-fill">
+                    <button class="quick-fill-btn" onclick="fillScene('现代都市街道，霓虹灯闪烁')">都市夜景</button>
+                    <button class="quick-fill-btn" onclick="fillScene('古风中式庭院，月光下')">古风庭院</button>
+                    <button class="quick-fill-btn" onclick="fillScene('未来科幻太空站内部')">科幻场景</button>
+                    <button class="quick-fill-btn" onclick="fillScene('森林深处，阳光透过树叶')">自然森林</button>
+                </div>
+            </div>
+            </div>
+        </div>
+
+        <!-- 分镜设置 -->
+        <div class="card collapsible" id="shotsSettingsCard">
+            <div class="card-collapse-header" onclick="toggleCardCollapse('shotsSettingsCard')">
+                <h2>
+                    🎥 分镜设置
+                    <span class="card-collapse-summary" id="shotsSettingsSummary"></span>
+                </h2>
+                <div class="collapse-toggle">
+                    <span class="collapse-icon">▼</span>
+                    <span class="collapse-text">折叠</span>
+                </div>
+            </div>
+            <div class="card-collapse-content">
+                <div style="display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 15px;">
+                    <button class="btn btn-sm btn-warning" onclick="aiGenerateAllShots()">🤖 AI生成全部镜头</button>
+                    <button class="btn btn-sm btn-info" onclick="autoFillShots()">✨ 模板填充</button>
+                    <button class="btn btn-sm btn-danger" onclick="clearAllShots()">🗑️ 清空</button>
+                </div>
+
+                <div class="shot-types-legend">
+                    <h4>📐 景别参考</h4>
+                    <div class="shot-types-grid" id="shotTypesGrid">
+                        <!-- 景别图例将由 JavaScript 从配置文件动态生成 -->
+                    </div>
+                </div>
+
+                <div class="shots-container" id="shotsContainer"></div>
+            </div>
+        </div>
+
+        <!-- 生成按钮 -->
+        <div class="button-group">
+            <button class="btn btn-primary" onclick="generatePrompt()">🚀 生成提示词</button>
+        </div>
+
+        <!-- 输出结果 -->
+        <div class="card output-section active collapsible" id="outputSection">
+            <div class="card-collapse-header" onclick="toggleCardCollapse('outputSection')">
+                <h2>
+                    📝 生成结果
+                    <span class="card-collapse-summary" id="outputSectionSummary"></span>
+                </h2>
+                <div class="collapse-toggle">
+                    <span class="collapse-icon">▼</span>
+                    <span class="collapse-text">折叠</span>
+                </div>
+            </div>
+            <div class="card-collapse-content">
+            <div class="card-header" style="border: none; padding: 0; margin-bottom: 15px;">
+                <div></div>
+                <div class="lang-switch">
+                    <button class="lang-btn active" id="langZh" onclick="switchLang('zh')">中文</button>
+                    <button class="lang-btn" id="langEn" onclick="switchLang('en')">English</button>
+                </div>
+            </div>
+
+            <div class="output-box">
+                <div class="output-box-header">
+                    <span class="output-label">💡 可直接编辑修改提示词</span>
+                    <button class="btn btn-sm btn-success copy-btn" onclick="copyOutput()">📋 复制</button>
+                </div>
+                <textarea class="output-text" id="outputText" placeholder="点击「生成提示词」按钮或直接在此输入提示词..."></textarea>
+            </div>
+
+            <div class="button-group">
+                <button class="btn btn-info" onclick="downloadTxt()">📥 下载TXT</button>
+                <button class="btn btn-warning" onclick="generateImage()">🎨 AI文生图</button>
+            </div>
+            </div>
+        </div>
+
+        <!-- AI生成图片结果 -->
+        <div class="card output-section active collapsible" id="imageOutputSection">
+            <div class="card-collapse-header" onclick="toggleCardCollapse('imageOutputSection')">
+                <h2>
+                    🎨 AI生成图片
+                    <span class="card-collapse-summary" id="imageOutputSectionSummary"></span>
+                </h2>
+                <div class="collapse-toggle">
+                    <span class="collapse-icon">▼</span>
+                    <span class="collapse-text">折叠</span>
+                </div>
+            </div>
+            <div class="card-collapse-content">
+            <div class="card-header" style="border: none; padding: 0; margin-bottom: 15px;">
+                <div></div>
+                <div style="display: flex; gap: 10px; align-items: center;">
+                    <select id="imageAspectRatio" class="image-select">
+                        <option value="16:9">16:9 宽屏</option>
+                        <option value="9:16">9:16 竖屏</option>
+                        <option value="1:1">1:1 正方形</option>
+                        <option value="4:3">4:3 传统</option>
+                        <option value="3:4">3:4 竖版</option>
+                        <option value="3:2">3:2 照片</option>
+                        <option value="2:3">2:3 竖版照片</option>
+                        <option value="21:9">21:9 超宽</option>
+                        <option value="4:5">4:5 社交媒体</option>
+                        <option value="5:4">5:4 横版</option>
+                    </select>
+                    <select id="imageSize" class="image-select">
+                        <option value="2K">2K</option>
+                        <option value="1K">1K</option>
+                        <option value="4K">4K</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="tips" style="margin-bottom: 15px;">
+                💡 使用 <code>nano-banana-2</code> 模型，支持最多 <strong>9张参考图</strong>。可从上方参考图添加，或直接上传/输入URL。<br>
+                🖱️ <strong>点击生成的图片</strong>可放大预览，按 ESC 或点击背景关闭。
+            </div>
+
+            <!-- 自定义参考图区域 -->
+            <div class="image-gen-ref-section">
+                <div class="section-header">
+                    <h4>📷 文生图参考图 <span id="imageGenRefCount">(0/9)</span></h4>
+                    <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                        <button class="btn btn-sm btn-primary" onclick="openAddRefImagePicker()" title="从上传的参考图中选择">📷 添加参考图</button>
+                        <button class="btn btn-sm btn-info" onclick="uploadImageGenRef()">📁 上传图片</button>
+                        <button class="btn btn-sm btn-secondary" onclick="addImageGenRefByUrl()">🔗 输入URL</button>
+                        <button class="btn btn-sm btn-danger" onclick="clearImageGenRef()">🗑️ 清空</button>
+                    </div>
+                </div>
+                <input type="file" id="imageGenRefInput" accept="image/*" multiple style="display:none;">
+                <div class="image-gen-ref-list" id="imageGenRefList">
+                    <div class="image-gen-ref-empty">暂无参考图，可从上方参考图点击"用于文生图"添加，或直接上传/输入URL</div>
+                </div>
+            </div>
+
+            <!-- 所有生成图片画廊 -->
+            <div id="allGeneratedImagesSection" style="margin-top: 20px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                    <h4 style="margin: 0; color: #aaa;">📸 生成的图片 (<span id="generatedImagesCount">0</span>)</h4>
+                    <div style="display: flex; gap: 8px;">
+                        <button class="btn btn-sm btn-warning" onclick="downloadAllGeneratedImages()" title="下载所有图片">📦 下载全部</button>
+                        <button class="btn btn-sm btn-danger" onclick="clearAllGeneratedImages()" title="清空所有生成的图片">🗑️ 清空</button>
+                    </div>
+                </div>
+                <div id="allGeneratedImages" class="generated-images-gallery">
+                    <div style="color: #666; text-align: center; padding: 40px;">点击上方"AI文生图"按钮生成图片</div>
+                </div>
+            </div>
+
+            <div class="button-group" id="imageDownloadBtns" style="display: none;">
+                <button class="btn btn-success" onclick="downloadGeneratedImage()">📥 下载图片</button>
+                <button class="btn btn-info" onclick="copyGeneratedImage()">📋 复制图片</button>
+                <button class="btn btn-warning" onclick="downloadAllGeneratedImages()">📦 下载全部</button>
+            </div>
+            </div>
+        </div>
+
+        <!-- 九宫格图片拆分功能 -->
+        <div class="card output-section active collapsible" id="splitSection">
+            <div class="card-collapse-header" onclick="toggleCardCollapse('splitSection')">
+                <h2>
+                    🧩 九宫格图片拆分
+                    <span class="card-collapse-summary" id="splitSectionSummary"></span>
+                </h2>
+                <div class="collapse-toggle">
+                    <span class="collapse-icon">▼</span>
+                    <span class="collapse-text">折叠</span>
+                </div>
+            </div>
+            <div class="card-collapse-content">
+            <div class="card-header" style="border: none; padding: 0; margin-bottom: 15px;">
+                <div></div>
+                <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+                    <select id="splitLayout" class="image-select" title="选择拆分布局">
+                        <option value="1x1">1×1</option>
+                        <option value="2x2">2×2</option>
+                        <option value="2x3">2×3</option>
+                        <option value="3x2">3×2</option>
+                        <option value="3x3" selected>3×3</option>
+                        <option value="4x4">4×4</option>
+                        <option value="4x6">4×6</option>
+                        <option value="6x4">6×4</option>
+                        <option value="6x6">6×6</option>
+                    </select>
+                    <select id="splitFormat" class="image-select" title="输出格式">
+                        <option value="png">PNG</option>
+                        <option value="jpeg">JPG</option>
+                        <option value="webp">WebP</option>
+                    </select>
+                    <button class="btn btn-sm btn-warning" onclick="clearSplitSourceImages()" id="clearSplitBtn" style="display:none;">🗑️ 清空</button>
+                </div>
+            </div>
+
+            <!-- 快捷操作工具栏 -->
+            <div class="split-toolbar" style="display: flex; gap: 8px; padding: 12px 0; border-bottom: 1px solid rgba(255,255,255,0.1); margin-bottom: 15px; flex-wrap: wrap; align-items: center;">
+                <span style="color: #888; font-size: 13px; margin-right: 5px;">添加图片:</span>
+                <button class="btn btn-sm btn-primary" onclick="useCurrentGeneratedImageForSplit()" title="使用上方AI生成的图片">
+                    📸 生成图
+                </button>
+                <button class="btn btn-sm btn-info" onclick="uploadSplitImages()" title="从电脑选择图片上传">
+                    📁 上传
+                </button>
+                <button class="btn btn-sm btn-secondary" onclick="addSplitImageByUrl()" title="通过URL添加网络图片">
+                    🔗 URL
+                </button>
+                <div style="flex: 1;"></div>
+                <label class="toggle-switch" style="display: flex; align-items: center; gap: 6px; cursor: pointer;" title="启用后拆分时自动AI放大">
+                    <input type="checkbox" id="upscaleEnabled" onchange="toggleUpscale(this.checked)">
+                    <span class="toggle-slider"></span>
+                    <span style="color: #aaa; font-size: 12px;">� AI放大</span>
+                </label>
+            </div>
+            <input type="file" id="splitImageInput" accept="image/*" multiple style="display:none;">
+
+            <!-- AI放大选项（折叠显示） -->
+            <div id="upscaleOptions" style="display: none; padding: 10px 12px; background: linear-gradient(135deg, rgba(102,126,234,0.15) 0%, rgba(118,75,162,0.15) 100%); border-radius: 8px; margin-bottom: 15px;">
+                <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+                    <span style="color: #a5b4fc; font-size: 12px;">放大模型:</span>
+                    <select id="upscaleModel" class="shot-type-select" style="min-width: 130px; font-size: 12px;" onchange="updateUpscaleConfig()">
+                        <option value="upscayl-standard-4x">标准模型</option>
+                        <option value="upscayl-lite-4x">轻量(快速)</option>
+                        <option value="ultrasharp-4x">超清晰</option>
+                        <option value="ultramix-balanced-4x">平衡</option>
+                        <option value="high-fidelity-4x">高保真</option>
+                        <option value="remacri-4x">Remacri</option>
+                        <option value="digital-art-4x">动漫/插画</option>
+                    </select>
+                    <span style="color: #a5b4fc; font-size: 12px;">倍数:</span>
+                    <select id="upscaleScale" class="shot-type-select" style="min-width: 60px; font-size: 12px;" onchange="updateUpscaleConfig()">
+                        <option value="2">2x</option>
+                        <option value="3">3x</option>
+                        <option value="4" selected>4x</option>
+                    </select>
+                    <span id="upscaleStatus" style="color: #888; font-size: 11px;">⏳ 检测中...</span>
+                </div>
+            </div>
+
+            <!-- 源图片预览区 -->
+            <div id="splitSourcePreview" style="text-align: center; margin-bottom: 15px;">
+                <div style="color: #666; padding: 50px 20px; background: rgba(0,0,0,0.2); border-radius: 12px; border: 2px dashed rgba(255,255,255,0.1);">
+                    <div style="font-size: 32px; margin-bottom: 10px;">📷</div>
+                    <div>点击上方按钮添加要拆分的图片</div>
+                    <div style="font-size: 12px; color: #555; margin-top: 5px;">支持同时添加多张图片进行批量拆分</div>
+                </div>
+            </div>
+
+            <!-- 拆分结果预览 -->
+            <div id="splitResultSection" style="display: none;">
+                <!-- 结果标题和选择控制 -->
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; flex-wrap: wrap; gap: 10px;">
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <h4 style="margin: 0; color: #aaa;">✂️ 拆分结果</h4>
+                        <span id="splitSelectionCount" style="color: #a5b4fc; font-size: 12px; background: rgba(102,126,234,0.2); padding: 2px 8px; border-radius: 10px;"></span>
+                    </div>
+                    <div style="display: flex; gap: 6px; flex-wrap: wrap;">
+                        <button class="btn btn-xs btn-secondary" onclick="selectAllSplitImages()" title="全选">☑️ 全选</button>
+                        <button class="btn btn-xs btn-secondary" onclick="deselectAllSplitImages()" title="取消全选">⬜ 清空</button>
+                        <button class="btn btn-xs btn-secondary" onclick="invertSplitSelection()" title="反选">🔄 反选</button>
+                    </div>
+                </div>
+                
+                <!-- 拆分结果网格 -->
+                <div id="splitResultGrid" class="split-result-grid"></div>
+                
+                <!-- 操作按钮组 - 紧凑布局 -->
+                <div class="split-actions" style="margin-top: 15px; padding: 15px; background: rgba(0,0,0,0.2); border-radius: 10px;">
+                    <!-- 下载操作行 -->
+                    <div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 12px;">
+                        <button class="btn btn-success" onclick="downloadAllSplitImages()" style="flex: 1; min-width: 120px;">
+                            📦 全部(ZIP)
+                        </button>
+                        <button class="btn btn-success" onclick="downloadSelectedSplitImagesZip()" style="flex: 1; min-width: 120px;">
+                            📦 选中(ZIP)
+                        </button>
+                        <button class="btn btn-info" onclick="downloadSelectedSplitImages()" style="flex: 1; min-width: 100px;">
+                            📥 下载选中
+                        </button>
+                    </div>
+                    <!-- 视频操作行 -->
+                    <div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 12px;">
+                        <button class="btn btn-primary" onclick="useSplitImagesForVideo('ref')" style="flex: 1; min-width: 160px;">
+                            🎬 选中→视频（参考帧）
+                        </button>
+                        <button class="btn btn-accent" onclick="useSplitImagesForVideo('first')" style="flex: 1; min-width: 160px;">
+                            🎬 选中→视频（首帧）
+                        </button>
+                    </div>
+                    
+                    <!-- 下载设置行 - 可折叠 -->
+                    <details style="margin-top: 8px;">
+                        <summary style="color: #888; font-size: 12px; cursor: pointer; user-select: none;">
+                            ⚙️ 下载设置
+                        </summary>
+                        <div style="margin-top: 10px; padding: 10px; background: rgba(0,0,0,0.2); border-radius: 8px;">
+                            <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 8px;">
+                                <span style="color: #aaa; font-size: 12px; white-space: nowrap;">文件名前缀:</span>
+                                <input type="text" id="downloadPrefix" class="shot-desc" 
+                                       placeholder="例如: 场景1_" 
+                                       style="flex: 1; min-width: 150px; padding: 4px 10px; height: 26px; font-size: 12px;"
+                                       onchange="updateDownloadConfig()"
+                                       oninput="updateDownloadConfig()">
+                                <label style="display: flex; align-items: center; gap: 4px; color: #888; cursor: pointer; font-size: 12px;">
+                                    <input type="checkbox" id="downloadTimestamp" checked onchange="updateDownloadConfig()">
+                                    <span>时间戳</span>
+                                </label>
+                            </div>
+                            <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+                                <button class="btn btn-xs btn-secondary" onclick="selectDownloadDirectory()">📂 选择目录</button>
+                                <span id="selectedDirPath" style="color: #666; font-size: 11px;">使用浏览器默认位置</span>
+                            </div>
+                        </div>
+                    </details>
+                </div>
+            </div>
+            </div>
+        </div>
+
+        <!-- 视频分镜功能 -->
+        <div class="card output-section active collapsible" id="videoSection" style="max-width: 100%; overflow: hidden;">
+            <div class="card-collapse-header" onclick="toggleCardCollapse('videoSection')">
+                <h2>
+                    🎬 视频分镜
+                    <span class="card-collapse-summary" id="videoSectionSummary"></span>
+                </h2>
+                <div class="collapse-toggle">
+                    <span class="collapse-icon">▼</span>
+                    <span class="collapse-text">折叠</span>
+                </div>
+            </div>
+            <div class="card-collapse-content">
+            <div class="card-header" style="border: none; padding: 0; margin-bottom: 15px;">
+                <div></div>
+                <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+                    <select id="videoModel" class="image-select" onchange="onVideoModelChange();">
+                        <optgroup label="Sora 系列">
+                            <option value="sora-2" selected>Sora 2 (图生视频)</option>
+                            <option value="sora-2-pro">Sora 2 Pro (高清/长时长)</option>
+                        </optgroup>
+                        <optgroup label="Veo 3.1 系列">
+                            <option value="veo3.1">Veo 3.1 (首帧/尾帧)</option>
+                            <option value="veo3.1-pro">Veo 3.1 Pro (首帧/尾帧/高质量)</option>
+                            <option value="veo3.1-components">Veo 3.1 Components (多图1-3张)</option>
+                        </optgroup>
+                    </select>
+                    <select id="videoAspectRatio" class="image-select">
+                        <option value="16:9">16:9 横屏</option>
+                        <option value="9:16">9:16 竖屏</option>
+                    </select>
+                    <select id="videoDuration" class="image-select" style="display: none;">
+                        <option value="10">10秒</option>
+                        <option value="15">15秒</option>
+                        <option value="25">25秒</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="tips" style="margin-bottom: 15px;">
+                💡 <strong>视频分镜模式</strong>：默认根据网格布局创建分镜数量，可通过 ➕➖ 按钮自定义添加或删减。
+                每个分镜可以单独设置参考图和动作描述，AI将为每个分镜生成独立的短视频片段。
+                <br>⏱️ 每个视频分镜生成需要1-3分钟，请耐心等待。
+                <div style="margin-top: 8px; padding: 8px; background: rgba(240,147,251,0.1); border-radius: 6px;">
+                    <strong>当前模型：</strong><span id="videoModelTip" style="color: #f093fb;">支持首帧图生视频或纯文生视频，自动配音，性价比高</span>
+                </div>
+                <div style="margin-top: 8px; display: flex; gap: 15px; flex-wrap: wrap;">
+                    <label style="display: flex; align-items: center; gap: 5px; cursor: pointer; color: #aaa;">
+                        <input type="checkbox" id="videoEnhancePrompt">
+                        <span>AI增强提示词（中文自动转英文）</span>
+                    </label>
+                    <label style="display: none; align-items: center; gap: 5px; cursor: pointer; color: #aaa;" id="videoHdLabel">
+                        <input type="checkbox" id="videoHd">
+                        <span>高清模式 (HD)</span>
+                    </label>
+                    <label style="display: none; align-items: center; gap: 5px; cursor: pointer; color: #aaa;" id="videoWatermarkLabel">
+                        <input type="checkbox" id="videoWatermark">
+                        <span>添加水印</span>
+                    </label>
+                </div>
+            </div>
+
+            <!-- 分镜数量控制 -->
+            <div class="video-shot-controls" style="margin-bottom: 15px; display: flex; gap: 15px; align-items: center; flex-wrap: wrap; padding: 12px; background: rgba(0,0,0,0.2); border-radius: 8px;">
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <span class="video-shot-count">📽️ <span id="videoShotCount">9</span> 个分镜</span>
+                    <button class="btn btn-sm" onclick="removeVideoShot()" title="删除最后一个分镜" style="padding: 4px 10px;">➖</button>
+                    <button class="btn btn-sm" onclick="addVideoShot()" title="添加分镜" style="padding: 4px 10px;">➕</button>
+                    <button class="btn btn-sm btn-primary" onclick="syncVideoShotsToGrid()" title="同步为网格布局数量">🔄 同步网格</button>
+                </div>
+                <div style="display: flex; gap: 6px; align-items: center;">
+                    <span style="color: #888; font-size: 12px;">快速设置:</span>
+                    <button class="btn btn-sm" onclick="setVideoShotCount(4)" style="padding: 3px 8px; font-size: 11px;">4</button>
+                    <button class="btn btn-sm" onclick="setVideoShotCount(6)" style="padding: 3px 8px; font-size: 11px;">6</button>
+                    <button class="btn btn-sm" onclick="setVideoShotCount(9)" style="padding: 3px 8px; font-size: 11px;">9</button>
+                    <button class="btn btn-sm" onclick="setVideoShotCount(12)" style="padding: 3px 8px; font-size: 11px;">12</button>
+                    <button class="btn btn-sm" onclick="setVideoShotCount(16)" style="padding: 3px 8px; font-size: 11px;">16</button>
+                    <button class="btn btn-sm" onclick="setVideoShotCount(24)" style="padding: 3px 8px; font-size: 11px;">24</button>
+                </div>
+            </div>
+
+            <!-- 批量操作按钮 -->
+            <div class="video-batch-actions" style="margin-bottom: 15px; display: flex; gap: 10px; flex-wrap: wrap;">
+                <button class="btn btn-sm btn-info" onclick="useShotsForVideo()"> 从分镜导入</button>
+                <button class="btn btn-sm btn-info" onclick="useSplitForVideo()"> 从拆分图导入</button>
+                <button class="btn btn-sm btn-warning" onclick="generateAllVideoShots()">  生成全部视频</button>
+                <button class="btn btn-sm btn-success" onclick="downloadAllVideoShots()"> 下载全部视频</button>
+                <button class="btn btn-sm btn-danger" onclick="clearAllVideoShots()"> 清空所有</button>
+            </div>
+
+            <!-- 视频分镜网格 -->
+            <div class="video-shots-container" id="videoShotsContainer">
+                <div class="video-shots-empty">
+                    正在加载视频分镜...
+                </div>
+            </div>
+
+            <!-- 手动查询任务 -->
+            <div style="margin-top: 15px; padding: 15px; background: rgba(102, 126, 234, 0.1); border-radius: 10px; border: 1px dashed rgba(102, 126, 234, 0.3);">
+                <h4 style="margin-bottom: 10px; color: #667eea; font-size: 14px;">🔍 手动查询任务</h4>
+                <div style="display: flex; gap: 10px; align-items: center;">
+                    <input type="text" id="manualTaskId" placeholder="输入 task_id 查询任务状态" 
+                           style="flex: 1; padding: 8px 12px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.2); 
+                                  background: rgba(255,255,255,0.1); color: #fff; font-size: 13px;">
+                    <button onclick="queryManualTask()" class="btn btn-primary" style="padding: 8px 16px;">
+                        查询任务
+                    </button>
+                </div>
+                <div style="margin-top: 8px; font-size: 11px; color: #888;">
+                    💡 如果请求显示失败但 API 后台显示任务已创建，可以在此输入 task_id 手动查询
+                </div>
+            </div>
+
+            <!-- 视频生成历史 -->
+            <div id="videoHistorySection" style="margin-top: 20px; display: none;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                    <h4 style="color: #aaa; margin: 0;">📜 生成历史 <span id="historyCount" style="font-size: 12px; color: #667eea;"></span></h4>
+                    <div style="display: flex; gap: 8px;">
+                        <button onclick="exportVideoHistory()" class="btn btn-sm" style="padding: 5px 10px; font-size: 11px;" title="导出历史">
+                            📤 导出
+                        </button>
+                        <button onclick="clearAllVideoHistory()" class="btn btn-sm btn-danger" style="padding: 5px 10px; font-size: 11px;" title="清空所有历史">
+                            🗑️ 清空全部
+                        </button>
+                    </div>
+                </div>
+                <div id="videoHistoryList" class="video-history-list"></div>
+            </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 全局Loading -->
+    <div class="global-loading" id="globalLoading" onclick="emergencyCloseLoading(event)">
+        <div class="spinner"></div>
+        <div id="loadingText">AI正在分析中...</div>
+        <div style="margin-top: 20px; font-size: 12px; color: rgba(255,255,255,0.5);">点击任意位置可强制关闭</div>
+    </div>
+
+    <!-- 保存状态指示器 -->
+    <div id="saveIndicator" style="
+        position: fixed;
+        bottom: 20px;
+        right: 20px;
+        background: rgba(17, 153, 142, 0.9);
+        color: white;
+        padding: 10px 18px;
+        border-radius: 25px;
+        font-size: 13px;
+        font-weight: 500;
+        opacity: 0;
+        transition: all 0.3s ease;
+        pointer-events: none;
+        z-index: 9999;
+        box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+        backdrop-filter: blur(10px);
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    ">✓ 已保存</div>
+
+    <!-- 图片预览模态框 -->
+    <div class="image-modal" id="imageModal" onclick="closeImageModalOnBackdrop(event)">
+        <span class="image-modal-close" onclick="closeImageModal()">&times;</span>
+        <img id="imageModalImg" src="" alt="预览图片">
+        <div class="image-modal-actions">
+            <button class="action-btn" onclick="downloadModalImage()">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/>
+                </svg>
+                下载图片
+            </button>
+            <button class="action-btn" onclick="copyModalImage()">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                </svg>
+                复制图片
+            </button>
+            <button class="action-btn" onclick="openModalImageInNewTab()">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6M15 3h6v6M10 14L21 3"/>
+                </svg>
+                新标签页打开
+            </button>
+        </div>
+        <div class="image-modal-hint">按 ESC 或点击背景关闭预览</div>
+    </div>
+
+    <div class="toast" id="toast"></div>
+
+    <!-- 任务队列浮动按钮 -->
+    <div class="task-queue-float-btn" id="taskQueueFloatBtn" onclick="toggleTaskQueuePanel()" title="任务队列">
+        📋
+        <span class="task-queue-badge" id="taskQueueBadge">0</span>
+    </div>
+
+    <!-- 任务队列面板 -->
+    <div class="task-queue-panel" id="taskQueuePanel">
+        <div class="task-queue-header">
+            <h3>📋 任务队列</h3>
+            <div class="task-queue-header-actions">
+                <button class="task-queue-header-btn" onclick="taskQueue.pauseAll()" title="暂停全部">⏸️</button>
+                <button class="task-queue-header-btn" onclick="taskQueue.resumeAll()" title="恢复全部">▶️</button>
+                <button class="task-queue-header-btn" onclick="taskQueue.clearCompleted()" title="清除已完成">🧹</button>
+                <button class="task-queue-close" onclick="toggleTaskQueuePanel()">×</button>
+            </div>
+        </div>
+        
+        <div class="task-queue-tabs">
+            <button class="task-queue-tab active" data-tab="all" onclick="switchTaskTab('all')">
+                全部 <span id="tabCountAll">0</span>
+            </button>
+            <button class="task-queue-tab" data-tab="running" onclick="switchTaskTab('running')">
+                进行中 <span id="tabCountRunning">0</span>
+            </button>
+            <button class="task-queue-tab" data-tab="pending" onclick="switchTaskTab('pending')">
+                等待中 <span id="tabCountPending">0</span>
+            </button>
+            <button class="task-queue-tab" data-tab="completed" onclick="switchTaskTab('completed')">
+                已完成 <span id="tabCountCompleted">0</span>
+            </button>
+            <button class="task-queue-tab" data-tab="failed" onclick="switchTaskTab('failed')">
+                失败 <span id="tabCountFailed">0</span>
+            </button>
+        </div>
+        
+        <div class="task-queue-stats" id="taskQueueStats">
+            <div class="stat-item">
+                <span class="stat-value" id="statTotal">0</span>
+                <span class="stat-label">总任务</span>
+            </div>
+            <div class="stat-item">
+                <span class="stat-value" id="statRunning">0</span>
+                <span class="stat-label">运行中</span>
+            </div>
+            <div class="stat-item">
+                <span class="stat-value" id="statCompleted">0</span>
+                <span class="stat-label">已完成</span>
+            </div>
+            <div class="stat-item">
+                <span class="stat-value" id="statFailed">0</span>
+                <span class="stat-label">失败</span>
+            </div>
+        </div>
+        
+        <div class="task-queue-list" id="taskQueueList">
+            <div class="task-queue-empty">
+                <div class="task-queue-empty-icon">📭</div>
+                <div>暂无任务</div>
+                <div style="font-size: 12px; color: #666; margin-top: 5px;">任务将在这里显示</div>
+            </div>
+        </div>
+        
+        <div class="task-queue-footer">
+            <button class="btn btn-sm btn-danger" onclick="taskQueue.cancelAll()">取消全部</button>
+            <button class="btn btn-sm" onclick="taskQueue.clearHistory()">清空历史</button>
+        </div>
+    </div>
+
+    <!-- 添加参考图选择器模态框 -->
+    <div id="refImagePickerModal" style="display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.8); z-index: 10000; align-items: center; justify-content: center;">
+        <div style="background: #2a2a3e; border-radius: 12px; padding: 25px; max-width: 700px; width: 90%; max-height: 80vh; overflow-y: auto; box-shadow: 0 10px 40px rgba(0,0,0,0.5);">
+            <h3 style="margin-top: 0; color: #fff;">📷 选择参考图添加到文生图</h3>
+            <p style="color: #aaa; margin-bottom: 15px;">点击选择要添加的参考图（可多选），已添加的图片会显示勾选标记</p>
+            <div id="refImagePickerList" style="display: flex; flex-wrap: wrap; gap: 10px; max-height: 400px; overflow-y: auto; padding: 10px; background: rgba(0,0,0,0.2); border-radius: 8px; margin-bottom: 15px;">
+                <div style="color: #666; padding: 20px; width: 100%; text-align: center;">暂无上传的参考图</div>
+            </div>
+            <div style="display: flex; gap: 10px; justify-content: flex-end;">
+                <button onclick="closeRefImagePicker()" class="btn btn-secondary">关闭</button>
+                <button onclick="confirmAddRefImages()" class="btn btn-primary">✅ 确认添加</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 代理服务器警告模态框 -->
+    <div id="proxyWarningModal" class="modal" style="display: none;">
+        <div class="modal-content">
+            <h3>⚠️ 代理服务器未运行</h3>
+            <p>您已启用"强制使用代理"模式，但代理服务器未检测到。</p>
+            <p>请先运行 <code>启动代理服务器.bat</code> 启动本地代理服务器。</p>
+            <div class="modal-actions">
+                <button onclick="switchToDirectMode()" class="btn btn-secondary">切换为直连模式</button>
+                <button onclick="retryProxyCheck()" class="btn btn-primary">重新检测</button>
+                <button onclick="closeProxyWarning()" class="btn">关闭</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 模块化JavaScript -->
+    <script src="js/config.js"></script>
+    <script src="js/state.js"></script>
+    <script src="js/utils.js"></script>
+    <script src="js/lazy-image-manager.js"></script>
+    <script src="js/api.js"></script>
+    <script src="js/task-queue.js"></script>
+    <script src="js/image-processing.js"></script>
+    <script src="js/image-generation.js"></script>
+    <script src="js/shots.js"></script>
+    
+    <!-- Split模块（拆分自 split.js） -->
+    <script src="js/split/split-upscale.js"></script>
+    <script src="js/split/split-download.js"></script>
+    <script src="js/split/split-cache.js"></script>
+    <script src="js/split/split-source.js"></script>
+    <script src="js/split/split-core.js"></script>
+    
+    <!-- Video模块（拆分自 video.js） -->
+    <script src="js/video/video-utils.js"></script>
+    <script src="js/video/video-shots.js"></script>
+    <script src="js/video/video-render.js"></script>
+    <script src="js/video/video-generation.js"></script>
+    <script src="js/video/video-history.js"></script>
+    
+    <script src="js/storage.js"></script>
+    <script src="js/ui.js"></script>
+    <script src="js/main.js"></script>
+</body>
+</html>

@@ -1,0 +1,33 @@
+# 忽略系统文件
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# 忽略 IDE/编辑器配置
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# 忽略 Node.js 依赖
+node_modules/
+package-lock.json
+
+# 忽略日志文件
+*.log
+upscayl-api/server.log
+
+# 忽略临时文件和输出
+upscayl-api/uploads/*
+upscayl-api/outputs/*
+!upscayl-api/uploads/.gitkeep
+!upscayl-api/outputs/.gitkeep
+
+# 忽略大型二进制文件（可选，如果你想包含可执行文件则删除这些行）
+# upscayl-api/bin/*.exe
+# upscayl-api/bin/*.dll
+
+# 忽略本地配置
+.env
+.env.local
+config.local.js
