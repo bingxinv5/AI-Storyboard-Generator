@@ -112,22 +112,26 @@ async function checkProxyServerReal() {
 }
 
 // 初始化强制代理设置
-function initForceProxy() {
+async function initForceProxy() {
     const saved = localStorage.getItem('forceProxy');
     if (saved === 'true') {
         forceProxyEnabled = true;
-        proxyServerAvailable = true;
         const checkbox = document.getElementById('forceProxy');
         if (checkbox) checkbox.checked = true;
-        updateProxyStatus(true);
         
-        setTimeout(() => {
-            checkProxyServerReal().then(available => {
-                if (!available) {
-                    showProxyWarning();
-                }
-            });
-        }, 1000);
+        // 立即检测代理服务器是否真正可用
+        const available = await checkProxyServerReal();
+        if (available) {
+            proxyServerAvailable = true;
+            updateProxyStatus(true);
+            console.log('✅ 强制代理模式已启用，代理服务器运行正常');
+        } else {
+            // 代理不可用，但仍然保持强制代理标记（用户可能稍后启动代理）
+            proxyServerAvailable = false;
+            updateProxyStatus(false);
+            showProxyWarning();
+            console.warn('⚠️ 强制代理模式已启用，但代理服务器未检测到');
+        }
     }
 }
 

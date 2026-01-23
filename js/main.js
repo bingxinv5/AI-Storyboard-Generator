@@ -86,8 +86,10 @@ async function init() {
     // 初始化视频模型提示
     updateVideoModelTip();
     
-    // 初始化强制代理设置
-    initForceProxy();
+    // 初始化强制代理设置（异步，等待检测完成）
+    initForceProxy().then(() => {
+        console.log('代理初始化完成');
+    });
     
     // 初始化拆分图片上传监听
     initSplitImageUpload();
