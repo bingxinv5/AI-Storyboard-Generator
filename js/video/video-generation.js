@@ -8,8 +8,41 @@
 // 取消视频生成
 function cancelVideoGeneration(index) {
     const controller = videoGenerationControllers[index];
+    
+    // 首先尝试通过任务队列取消任务
+    if (typeof taskQueue !== 'undefined') {
+        const taskName = `视频分镜${index + 1}`;
+        // 查找并取消任务队列中的对应任务
+        for (const [taskId, task] of taskQueue.tasks.entries()) {
+            if (task.name === taskName && 
+                (task.status === TaskStatus.PENDING || task.status === TaskStatus.RUNNING)) {
+                taskQueue.cancelTask(taskId);
+                console.log(`🛑 已通过任务队列取消: ${taskName}`);
+                
+                // 更新分镜状态
+                if (videoShots[index]) {
+                    videoShots[index].status = 'pending';
+                    videoShots[index].error = null;
+                    renderVideoShots();
+                }
+                
+                showToast(`已取消分镜 ${index + 1} 的视频生成`, 'info');
+                return;
+            }
+        }
+    }
+    
+    // 如果没有在任务队列中找到，直接通过 controller 取消
     if (controller) {
         controller.abort();
+        
+        // 更新分镜状态
+        if (videoShots[index]) {
+            videoShots[index].status = 'pending';
+            videoShots[index].error = null;
+            renderVideoShots();
+        }
+        
         showToast(`已取消分镜 ${index + 1} 的视频生成`, 'info');
     }
 }
@@ -70,6 +103,8 @@ async function generateSingleVideoShot(index) {
             
             const abortController = new AbortController();
             videoGenerationControllers[index] = abortController;
+            // 将 abortController 注册到任务对象，以便任务队列可以取消
+            task.abortController = abortController;
             
             try {
                 const imageMode = getVideoModelImageMode();

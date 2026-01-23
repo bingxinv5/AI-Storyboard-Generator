@@ -312,7 +312,17 @@ class TaskQueueManager {
      */
     async runTask(taskId) {
         const task = this.tasks.get(taskId);
-        if (!task || task.status !== TaskStatus.PENDING) return;
+        if (!task) return;
+        
+        // 检查任务是否已被取消或不在等待状态
+        if (task.status === TaskStatus.CANCELLED) {
+            console.log(`🛑 任务已取消，跳过执行: ${task.name}`);
+            // 从队列中移除
+            this.queue = this.queue.filter(id => id !== taskId);
+            return;
+        }
+        
+        if (task.status !== TaskStatus.PENDING) return;
 
         // 从等待队列移除
         this.queue = this.queue.filter(id => id !== taskId);
@@ -375,8 +385,24 @@ class TaskQueueManager {
         } catch (error) {
             if (timeoutId) clearTimeout(timeoutId);
 
-            // 检查是否可以重试
-            if (task.retryCount < task.maxRetries) {
+            // 检查任务是否被用户取消（优先检查任务状态，因为 cancelTask 会设置状态）
+            const isCancelled = task.status === TaskStatus.CANCELLED || 
+                                error.name === 'AbortError' || 
+                                (error.message && error.message.includes('用户取消')) ||
+                                (error.message && error.message.includes('aborted')) ||
+                                (task.abortController && task.abortController.signal && task.abortController.signal.aborted);
+            
+            if (isCancelled) {
+                // 用户取消的任务，不重试，直接标记为取消
+                task.status = TaskStatus.CANCELLED;
+                task.completedAt = Date.now();
+                task.duration = task.completedAt - task.startedAt;
+                console.log(`🛑 任务已取消: ${task.name}`);
+                
+                // 从队列中移除此任务（防止重试时重新加入队列的情况）
+                this.queue = this.queue.filter(id => id !== taskId);
+            } else if (task.retryCount < task.maxRetries) {
+                // 非取消错误，检查是否可以重试
                 task.retryCount++;
                 task.status = TaskStatus.PENDING;
                 task.progress = 0;
@@ -451,10 +477,22 @@ class TaskQueueManager {
             this.updateUI();
             return true;
         } else if (task.status === TaskStatus.RUNNING) {
-            // 运行中的任务标记为取消（需要执行器支持取消）
-            // 注意：taskKeyMap 会在 finally 块中清理
+            // 运行中的任务标记为取消
             task.status = TaskStatus.CANCELLED;
+            
+            // 如果任务有 abortController，调用 abort() 来实际取消网络请求
+            if (task.abortController && typeof task.abortController.abort === 'function') {
+                try {
+                    task.abortController.abort();
+                    console.log(`🛑 已中止任务网络请求: ${task.name}`);
+                } catch (e) {
+                    console.warn('中止任务时出错:', e);
+                }
+            }
+            
             this.notifyListeners('taskCancelled', task);
+            this.saveToStorage();
+            this.updateUI();
             return true;
         }
 
@@ -543,6 +581,16 @@ class TaskQueueManager {
         // 取消运行中的任务
         for (const [taskId, task] of this.runningTasks.entries()) {
             task.status = TaskStatus.CANCELLED;
+            
+            // 如果任务有 abortController，调用 abort() 来实际取消网络请求
+            if (task.abortController && typeof task.abortController.abort === 'function') {
+                try {
+                    task.abortController.abort();
+                } catch (e) {
+                    console.warn('中止任务时出错:', e);
+                }
+            }
+            
             this.notifyListeners('taskCancelled', task);
         }
         
@@ -643,18 +691,113 @@ class TaskQueueManager {
 
     // ==================== 持久化 ====================
 
+    /**
+     * 清理任务数据，移除大型数据以便存储
+     * @param {Object} task - 任务对象
+     * @returns {Object} - 清理后的任务对象副本
+     */
+    sanitizeTaskForStorage(task) {
+        if (!task) return task;
+        
+        const sanitized = { ...task };
+        
+        // 移除可能包含大型数据的字段
+        const largeDataFields = ['imageUrl', 'videoUrl', 'result', 'output', 'input', 'data', 'blob', 'base64'];
+        
+        for (const field of largeDataFields) {
+            if (sanitized[field]) {
+                // 检查是否是 base64 数据或 blob URL
+                const value = String(sanitized[field]);
+                if (value.startsWith('data:') || value.startsWith('blob:') || value.length > 1000) {
+                    sanitized[field] = '[已清理的大型数据]';
+                }
+            }
+        }
+        
+        // 移除不可序列化的字段
+        delete sanitized.executor;
+        delete sanitized.onProgress;
+        delete sanitized.onComplete;
+        delete sanitized.onError;
+        delete sanitized.abortController;
+        
+        // 只保留必要的元数据
+        return {
+            id: sanitized.id,
+            name: sanitized.name,
+            type: sanitized.type,
+            status: sanitized.status,
+            priority: sanitized.priority,
+            progress: sanitized.progress,
+            progressText: sanitized.progressText,
+            createdAt: sanitized.createdAt,
+            startedAt: sanitized.startedAt,
+            completedAt: sanitized.completedAt,
+            duration: sanitized.duration,
+            error: sanitized.error,
+            retryCount: sanitized.retryCount,
+            maxRetries: sanitized.maxRetries,
+            uniqueKey: sanitized.uniqueKey
+        };
+    }
+
     saveToStorage() {
         try {
+            // 清理已完成任务数据
+            const sanitizedCompletedTasks = this.completedTasks
+                .slice(0, 50) // 只保存最近50条
+                .map(task => this.sanitizeTaskForStorage(task));
+            
             const data = {
                 queue: this.queue,
-                tasks: Array.from(this.tasks.entries()).filter(([id, task]) => 
-                    task.status === TaskStatus.PENDING || task.status === TaskStatus.RUNNING
-                ),
-                completedTasks: this.completedTasks.slice(0, 50) // 只保存最近50条
+                tasks: Array.from(this.tasks.entries())
+                    .filter(([id, task]) => 
+                        task.status === TaskStatus.PENDING || task.status === TaskStatus.RUNNING
+                    )
+                    .map(([id, task]) => [id, this.sanitizeTaskForStorage(task)]),
+                completedTasks: sanitizedCompletedTasks
             };
+            
+            const jsonData = JSON.stringify(data);
+            
+            // 检查数据大小，如果太大则进一步减少保存的历史记录数量
+            const maxSize = 2 * 1024 * 1024; // 2MB 限制
+            if (jsonData.length > maxSize) {
+                // 数据太大，只保存最近10条完成任务
+                data.completedTasks = sanitizedCompletedTasks.slice(0, 10);
+                console.warn('任务队列数据较大，已减少保存的历史记录数量');
+            }
+            
             localStorage.setItem('taskQueue', JSON.stringify(data));
         } catch (e) {
-            console.warn('保存任务队列失败:', e);
+            // 如果仍然失败，尝试只保存最基本的信息
+            if (e.name === 'QuotaExceededError') {
+                try {
+                    console.warn('localStorage 配额已满，尝试清理并只保存最少数据');
+                    const minimalData = {
+                        queue: [],
+                        tasks: [],
+                        completedTasks: this.completedTasks.slice(0, 5).map(task => ({
+                            id: task.id,
+                            name: task.name,
+                            type: task.type,
+                            status: task.status,
+                            completedAt: task.completedAt
+                        }))
+                    };
+                    localStorage.setItem('taskQueue', JSON.stringify(minimalData));
+                } catch (e2) {
+                    // 如果还是失败，清空任务队列存储
+                    console.warn('无法保存任务队列，清空存储:', e2);
+                    try {
+                        localStorage.removeItem('taskQueue');
+                    } catch (e3) {
+                        // 忽略
+                    }
+                }
+            } else {
+                console.warn('保存任务队列失败:', e);
+            }
         }
     }
 
