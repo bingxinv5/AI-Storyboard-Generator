@@ -12,18 +12,24 @@ function cancelVideoGeneration(index) {
     // 首先尝试通过任务队列取消任务
     if (typeof taskQueue !== 'undefined') {
         const taskName = `视频分镜${index + 1}`;
-        // 查找并取消任务队列中的对应任务
+        const recoverTaskName = `恢复: 分镜${index + 1}`;
+        
+        // 查找并取消任务队列中的对应任务（包括恢复任务）
         for (const [taskId, task] of taskQueue.tasks.entries()) {
-            if (task.name === taskName && 
+            if ((task.name === taskName || task.name === recoverTaskName) && 
                 (task.status === TaskStatus.PENDING || task.status === TaskStatus.RUNNING)) {
                 taskQueue.cancelTask(taskId);
-                console.log(`🛑 已通过任务队列取消: ${taskName}`);
+                console.log(`🛑 已通过任务队列取消: ${task.name}`);
                 
                 // 更新分镜状态
                 if (videoShots[index]) {
                     videoShots[index].status = 'pending';
                     videoShots[index].error = null;
+                    delete videoShots[index].isRecovering;
+                    delete videoShots[index].taskId;
+                    delete videoShots[index].taskStartTime;
                     renderVideoShots();
+                    autoSave();
                 }
                 
                 showToast(`已取消分镜 ${index + 1} 的视频生成`, 'info');
@@ -40,10 +46,27 @@ function cancelVideoGeneration(index) {
         if (videoShots[index]) {
             videoShots[index].status = 'pending';
             videoShots[index].error = null;
+            delete videoShots[index].isRecovering;
+            delete videoShots[index].taskId;
+            delete videoShots[index].taskStartTime;
             renderVideoShots();
+            autoSave();
         }
         
         showToast(`已取消分镜 ${index + 1} 的视频生成`, 'info');
+    } else {
+        // 如果既不在任务队列中，也没有 controller，可能是刷新后的残留状态
+        // 直接重置分镜状态
+        if (videoShots[index] && (videoShots[index].status === 'generating' || videoShots[index].status === 'queued')) {
+            videoShots[index].status = 'pending';
+            videoShots[index].error = null;
+            delete videoShots[index].isRecovering;
+            delete videoShots[index].taskId;
+            delete videoShots[index].taskStartTime;
+            renderVideoShots();
+            autoSave();
+            showToast(`已重置分镜 ${index + 1} 的状态`, 'info');
+        }
     }
 }
 
@@ -703,11 +726,19 @@ async function resumePendingVideoTasks() {
                 shot.isRecovering = true;
                 shot.status = 'queued';
                 
+                // 使用闭包保存 index，确保取消按钮能正确工作
+                const shotIndex = task.index;
+                
                 taskQueue.addVideoTask(`恢复: 分镜${task.index + 1}`, async (queueTask, updateProgress) => {
                     shot.status = 'generating';
                     renderVideoShots();
                     
                     updateProgress(10, `恢复中... (已耗时 ${elapsed}秒)`);
+                    
+                    // 创建 abortController 并注册
+                    const abortController = new AbortController();
+                    videoGenerationControllers[shotIndex] = abortController;
+                    queueTask.abortController = abortController;
                     
                     let progressValue = 10;
                     const progressTimer = setInterval(() => {
@@ -726,7 +757,8 @@ async function resumePendingVideoTasks() {
                         const remainingTime = maxTime - (Date.now() - task.startTime);
                         const maxAttempts = Math.max(10, Math.floor(remainingTime / 5000));
                         
-                        const videoUrl = await pollVideoStatus(task.taskId, apiKey, maxAttempts, 5000);
+                        // 传递 abortController 以支持取消
+                        const videoUrl = await pollVideoStatus(task.taskId, apiKey, maxAttempts, 5000, abortController);
                         
                         clearInterval(progressTimer);
                         
@@ -751,7 +783,12 @@ async function resumePendingVideoTasks() {
                     } catch (error) {
                         clearInterval(progressTimer);
                         
-                        if (error.message.includes('超时') || error.message.includes('not found') || error.message.includes('404')) {
+                        // 检查是否是用户取消
+                        if (error.name === 'AbortError' || error.message.includes('用户取消')) {
+                            shot.status = 'pending';
+                            shot.error = null;
+                            delete shot.isRecovering;
+                        } else if (error.message.includes('超时') || error.message.includes('not found') || error.message.includes('404')) {
                             shot.status = 'error';
                             shot.error = `task_id: ${task.taskId}`;
                         } else {
@@ -765,6 +802,9 @@ async function resumePendingVideoTasks() {
                         renderVideoShots();
                         autoSave();
                         throw error;
+                    } finally {
+                        // 清理 controller
+                        delete videoGenerationControllers[shotIndex];
                     }
                 }, {
                     description: `task_id: ${task.taskId.substring(0, 20)}...`,
