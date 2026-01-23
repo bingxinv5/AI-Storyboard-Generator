@@ -381,7 +381,11 @@ const server = http.createServer(async (req, res) => {
     
     console.log(`  📤 转发到: https://${TARGET_HOST}${req.url}`);
     
+    // 标记请求是否已完成
+    let requestCompleted = false;
+    
     const proxyReq = https.request(options, (proxyRes) => {
+        if (requestCompleted) return;
         clearTimeout(timeoutTimer);
         console.log(`  ↳ 响应状态: ${proxyRes.statusCode}`);
         
@@ -393,10 +397,35 @@ const server = http.createServer(async (req, res) => {
         
         res.writeHead(proxyRes.statusCode);
         proxyRes.pipe(res);
+        
+        proxyRes.on('end', () => {
+            requestCompleted = true;
+        });
+    });
+    
+    // 监听客户端断开连接，取消代理请求
+    req.on('close', () => {
+        if (!requestCompleted) {
+            console.log('  ⚡ 客户端断开连接，取消代理请求');
+            requestCompleted = true;
+            clearTimeout(timeoutTimer);
+            proxyReq.destroy();
+        }
+    });
+    
+    req.on('aborted', () => {
+        if (!requestCompleted) {
+            console.log('  ⚡ 客户端中止请求');
+            requestCompleted = true;
+            clearTimeout(timeoutTimer);
+            proxyReq.destroy();
+        }
     });
     
     const timeoutTimer = setTimeout(() => {
+        if (requestCompleted) return;
         console.error(`  ✗ 请求超时 (${requestTimeout/1000}秒)`);
+        requestCompleted = true;
         proxyReq.destroy();
         if (!res.headersSent) {
             sendJSON(res, 504, { error: 'Gateway Timeout' });
@@ -404,7 +433,16 @@ const server = http.createServer(async (req, res) => {
     }, requestTimeout);
     
     proxyReq.on('error', (error) => {
+        if (requestCompleted) return;
+        requestCompleted = true;
         clearTimeout(timeoutTimer);
+        
+        // 如果是因为客户端断开导致的错误，不需要记录为错误
+        if (error.message === 'socket hang up' || error.code === 'ECONNRESET') {
+            console.log('  ⚡ 连接已断开（可能是客户端取消）');
+            return;
+        }
+        
         console.error(`  ✗ 代理错误: ${error.message}`);
         
         if (res.headersSent) return;

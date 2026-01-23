@@ -491,6 +491,9 @@ async function pollVideoStatus(taskId, apiKey, maxAttempts = 120, interval = 500
     const videoApiBaseUrl = (await getVideoApiBaseUrlAsync()).replace(/\/+$/, '');
     const url = `${videoApiBaseUrl}/v2/videos/generations/${taskId}`;
     
+    console.log(`🔍 轮询视频状态: ${url}`);
+    console.log(`   代理状态: forceProxyEnabled=${forceProxyEnabled}, proxyServerAvailable=${proxyServerAvailable}`);
+    
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
         if (abortController && abortController.signal.aborted) {
             throw new Error('用户取消了视频生成');
