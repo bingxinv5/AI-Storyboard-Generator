@@ -97,16 +97,21 @@ async function retryProxyCheck() {
 async function checkProxyServerReal() {
     try {
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 2000);
+        const timeoutId = setTimeout(() => controller.abort(), 5000); // 增加到5秒
+        
+        console.log('🔍 检测代理服务器...', PROXY_SERVER_URL);
         
         const response = await fetch(`${PROXY_SERVER_URL}/health-check`, {
             method: 'GET',
-            signal: controller.signal
+            signal: controller.signal,
+            cache: 'no-cache' // 禁用缓存
         });
         
         clearTimeout(timeoutId);
+        console.log('   代理检测响应:', response.ok, response.status);
         return response.ok;
     } catch (error) {
+        console.warn('   代理检测失败:', error.message);
         return false;
     }
 }

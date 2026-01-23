@@ -591,8 +591,12 @@ async function pollVideoStatus(taskId, apiKey, maxAttempts = 120, interval = 500
 
 // 手动查询任务
 async function queryManualTask() {
+    console.log('🔍 手动查询任务被调用');
+    
     const taskIdInput = document.getElementById('manualTaskId');
     const taskId = taskIdInput?.value?.trim();
+    
+    console.log('   task_id:', taskId);
     
     if (!taskId) {
         showToast('请输入 task_id', 'warning');
@@ -600,6 +604,8 @@ async function queryManualTask() {
     }
     
     const apiKey = getApiKey();
+    console.log('   API Key 存在:', !!apiKey);
+    
     if (!apiKey) {
         showToast('请先配置 API Key', 'error');
         return;
@@ -611,12 +617,16 @@ async function queryManualTask() {
         const videoApiBaseUrl = (await getVideoApiBaseUrlAsync()).replace(/\/+$/, '');
         const url = `${videoApiBaseUrl}/v2/videos/generations/${taskId}`;
         
+        console.log('   请求 URL:', url);
+        
         const response = await fetch(url, {
             method: 'GET',
             headers: {
                 'Authorization': `Bearer ${apiKey}`
             }
         });
+        
+        console.log('   响应状态:', response.status);
         
         if (!response.ok) {
             const errorText = await response.text();

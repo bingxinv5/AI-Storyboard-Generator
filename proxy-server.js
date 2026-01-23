@@ -151,6 +151,7 @@ const server = http.createServer(async (req, res) => {
     
     // 代理健康检查（兼容旧路径）
     if (pathname === '/health-check' || pathname === '/health') {
+        console.log(`[${new Date().toLocaleTimeString()}] 💓 健康检查请求`);
         return sendJSON(res, 200, { status: 'ok', proxy: true, target: TARGET_HOST });
     }
 
