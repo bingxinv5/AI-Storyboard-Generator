@@ -820,13 +820,19 @@ async function resumePendingVideoTasks() {
         // 非任务队列模式
         const resumePromises = tasksToResume.map(async (task) => {
             const shot = videoShots[task.index];
+            const shotIndex = task.index;
+            
+            // 创建 abortController 并注册
+            const abortController = new AbortController();
+            videoGenerationControllers[shotIndex] = abortController;
             
             try {
                 const maxTime = 10 * 60 * 1000;
                 const remainingTime = maxTime - (Date.now() - task.startTime);
                 const maxAttempts = Math.max(10, Math.floor(remainingTime / 5000));
                 
-                const videoUrl = await pollVideoStatus(task.taskId, apiKey, maxAttempts, 5000);
+                // 传递 abortController 以支持取消
+                const videoUrl = await pollVideoStatus(task.taskId, apiKey, maxAttempts, 5000, abortController);
                 
                 if (videoUrl) {
                     shot.status = 'completed';
@@ -840,7 +846,11 @@ async function resumePendingVideoTasks() {
                     throw new Error('未获取到视频结果');
                 }
             } catch (error) {
-                if (error.message.includes('超时') || error.message.includes('not found') || error.message.includes('404')) {
+                // 检查是否是用户取消
+                if (error.name === 'AbortError' || error.message.includes('用户取消')) {
+                    shot.status = 'pending';
+                    shot.error = null;
+                } else if (error.message.includes('超时') || error.message.includes('not found') || error.message.includes('404')) {
                     shot.status = 'error';
                     shot.error = `task_id: ${task.taskId}`;
                 } else {
@@ -849,6 +859,9 @@ async function resumePendingVideoTasks() {
                 }
                 delete shot.taskId;
                 delete shot.taskStartTime;
+            } finally {
+                // 清理 controller
+                delete videoGenerationControllers[shotIndex];
             }
             
             renderVideoShots();
