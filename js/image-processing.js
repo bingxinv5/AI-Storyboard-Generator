@@ -1049,7 +1049,8 @@ async function loadDescToShots(index) {
 // 添加到文生图参考
 function addToImageGenRef(index) {
     const img = refImages[index];
-    const exists = imageGenRefImages.find(r => r.id === img.id);
+    // 检查是否已添加（同时检查 id 和 sourceId）
+    const exists = imageGenRefImages.find(r => r.id === img.id || r.sourceId === img.id);
     if (exists) {
         showToast('该图片已在文生图参考列表中', 'warning');
         return;
@@ -1061,7 +1062,8 @@ function addToImageGenRef(index) {
     imageGenRefImages.push({
         id: img.id,
         data: img.data,
-        source: 'upload'
+        source: 'upload',
+        sourceId: img.id  // 添加 sourceId 以便图片选择器识别
     });
     updateImageGenRefDisplay();
     showToast('已添加到文生图参考', 'success');
