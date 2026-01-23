@@ -491,11 +491,14 @@ async function pollVideoStatus(taskId, apiKey, maxAttempts = 120, interval = 500
     const videoApiBaseUrl = (await getVideoApiBaseUrlAsync()).replace(/\/+$/, '');
     const url = `${videoApiBaseUrl}/v2/videos/generations/${taskId}`;
     
-    console.log(`🔍 轮询视频状态: ${url}`);
+    console.log(`🔍 开始轮询视频状态`);
+    console.log(`   URL: ${url}`);
     console.log(`   代理状态: forceProxyEnabled=${forceProxyEnabled}, proxyServerAvailable=${proxyServerAvailable}`);
+    console.log(`   最大尝试: ${maxAttempts}次, 间隔: ${interval/1000}秒`);
     
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
         if (abortController && abortController.signal.aborted) {
+            console.log(`   ⚡ 轮询被用户取消`);
             throw new Error('用户取消了视频生成');
         }
         
@@ -511,12 +514,15 @@ async function pollVideoStatus(taskId, apiKey, maxAttempts = 120, interval = 500
                 fetchOptions.signal = abortController.signal;
             }
             
+            console.log(`   📡 轮询 #${attempt + 1}/${maxAttempts}...`);
+            
             let response = null;
             for (let retry = 0; retry < 3; retry++) {
                 try {
                     response = await fetch(url, fetchOptions);
                     break;
                 } catch (fetchError) {
+                    console.warn(`   ⚠️ 轮询请求失败 (重试 ${retry + 1}/3):`, fetchError.message);
                     if (retry < 2) {
                         await new Promise(resolve => setTimeout(resolve, 2000));
                     }
@@ -524,6 +530,7 @@ async function pollVideoStatus(taskId, apiKey, maxAttempts = 120, interval = 500
             }
             
             if (!response) {
+                console.warn(`   ⚠️ 轮询无响应，等待下次尝试...`);
                 await new Promise(resolve => setTimeout(resolve, interval));
                 continue;
             }
@@ -535,6 +542,8 @@ async function pollVideoStatus(taskId, apiKey, maxAttempts = 120, interval = 500
             
             const data = await response.json();
             const status = data.status ? data.status.toUpperCase() : '';
+            
+            console.log(`   📊 状态: ${status || '未知'}`);
             
             if (status === 'SUCCESS' || status === 'COMPLETED' || status === 'SUCCEEDED') {
                 let videoUrl = null;
@@ -550,20 +559,24 @@ async function pollVideoStatus(taskId, apiKey, maxAttempts = 120, interval = 500
                 }
                 
                 if (videoUrl) {
+                    console.log(`   ✅ 视频生成完成! URL: ${videoUrl.substring(0, 50)}...`);
                     return videoUrl;
                 } else {
                     throw new Error('任务完成但未找到视频URL');
                 }
             } else if (status === 'FAILED' || status === 'ERROR' || status === 'FAILURE') {
                 const reason = data.fail_reason || data.error || data.message || '未知错误';
+                console.error(`   ❌ 视频生成失败: ${reason}`);
                 const finalError = new Error(`视频生成失败: ${reason}`);
                 finalError.isFinalFailure = true;
                 throw finalError;
             }
             
+            // 等待下次轮询
             const startTime = Date.now();
             while (Date.now() - startTime < interval) {
                 if (abortController && abortController.signal.aborted) {
+                    console.log(`   ⚡ 等待期间被取消`);
                     throw new Error('用户取消了视频生成');
                 }
                 await new Promise(resolve => setTimeout(resolve, 500));
@@ -571,21 +584,26 @@ async function pollVideoStatus(taskId, apiKey, maxAttempts = 120, interval = 500
             
         } catch (error) {
             if (error.name === 'AbortError' || error.message.includes('用户取消')) {
+                console.log(`   🛑 轮询被取消: ${error.message}`);
                 throw error;
             }
             
             if (error.isFinalFailure) {
+                console.error(`   💥 最终错误: ${error.message}`);
                 throw error;
             }
             
             if (attempt === maxAttempts - 1) {
+                console.error(`   ⏱️ 最后一次尝试也失败: ${error.message}`);
                 throw error;
             }
             
+            console.warn(`   ⚠️ 轮询出错，${interval/1000}秒后重试: ${error.message}`);
             await new Promise(resolve => setTimeout(resolve, interval));
         }
     }
     
+    console.error(`   ❌ 轮询超时! 已尝试 ${maxAttempts} 次，共 ${maxAttempts * interval / 1000 / 60} 分钟`);
     throw new Error(`视频生成超时（${maxAttempts * interval / 1000 / 60}分钟）`);
 }
 
