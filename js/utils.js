@@ -62,6 +62,45 @@ function getModel() {
     return document.getElementById('modelSelect').value;
 }
 
+function getImageModel() {
+    const el = document.getElementById('imageModelSelect');
+    return el ? el.value : 'nano-banana-2';
+}
+
+// 保存模型选择到 localStorage
+function saveModelSelection(selectId, value) {
+    localStorage.setItem('saved_' + selectId, value);
+    // 更新文生图模型提示
+    if (selectId === 'imageModelSelect') {
+        const tip = document.getElementById('imageModelTip');
+        if (tip) tip.textContent = value;
+    }
+    console.log('📝 已保存模型选择:', selectId, '=', value);
+}
+
+// 恢复所有模型选择
+function restoreModelSelections() {
+    ['modelSelect', 'imageModelSelect'].forEach(id => {
+        const saved = localStorage.getItem('saved_' + id);
+        if (saved) {
+            const el = document.getElementById(id);
+            if (el) {
+                // 检查选项是否存在
+                const optionExists = Array.from(el.options).some(opt => opt.value === saved);
+                if (optionExists) {
+                    el.value = saved;
+                    console.log('🔄 已恢复模型选择:', id, '=', saved);
+                    // 更新文生图模型提示
+                    if (id === 'imageModelSelect') {
+                        const tip = document.getElementById('imageModelTip');
+                        if (tip) tip.textContent = saved;
+                    }
+                }
+            }
+        }
+    });
+}
+
 // 代理服务器地址
 const PROXY_URL = 'http://localhost:3456';
 

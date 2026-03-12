@@ -340,7 +340,7 @@ async function callImageGenerationAPI(prompt, referenceImages = [], aspectRatio 
     }
 
     const requestBody = {
-        model: 'nano-banana-2',
+        model: getImageModel(),
         prompt: prompt,
         aspect_ratio: aspectRatio,
         image_size: imageSize,

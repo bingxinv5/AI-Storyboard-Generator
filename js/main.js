@@ -35,6 +35,9 @@ async function init() {
     const savedApiBaseUrl = localStorage.getItem('apiBaseUrl');
     const savedVideoApiBaseUrl = localStorage.getItem('videoApiBaseUrl');
     
+    // 恢复模型选择
+    restoreModelSelections();
+    
     if (savedApiKey) {
         document.getElementById('apiKey').value = savedApiKey;
     }

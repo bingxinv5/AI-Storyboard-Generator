@@ -48,7 +48,8 @@
                 </div>
                 <div class="setting-item" style="flex: 1; min-width: 160px;">
                     <label>模型选择</label>
-                    <select id="modelSelect">
+                    <select id="modelSelect" onchange="saveModelSelection('modelSelect', this.value)">
+                        <option value="gemini-3.1-pro-preview">gemini-3.1-pro-preview</option>
                         <option value="gemini-3-pro-preview">gemini-3-pro-preview</option>
                         <option value="gemini-2.5-pro-preview-06-05">gemini-2.5-pro-preview</option>
                         <option value="gemini-2.5-flash-preview-05-20">gemini-2.5-flash-preview</option>
@@ -306,6 +307,10 @@
             <div class="card-header" style="border: none; padding: 0; margin-bottom: 15px;">
                 <div></div>
                 <div style="display: flex; gap: 10px; align-items: center;">
+                    <select id="imageModelSelect" class="image-select" onchange="saveModelSelection('imageModelSelect', this.value)">
+                        <option value="nano-banana-2">nano-banana-2</option>
+                        <option value="gemini-3.1-flash-image-preview">gemini-3.1-flash-image</option>
+                    </select>
                     <select id="imageAspectRatio" class="image-select">
                         <option value="16:9">16:9 宽屏</option>
                         <option value="9:16">9:16 竖屏</option>
@@ -327,7 +332,7 @@
             </div>
 
             <div class="tips" style="margin-bottom: 15px;">
-                💡 使用 <code>nano-banana-2</code> 模型，支持最多 <strong>9张参考图</strong>。可从上方参考图添加，或直接上传/输入URL。<br>
+                💡 当前使用 <code id="imageModelTip">nano-banana-2</code> 模型，支持最多 <strong>9张参考图</strong>。可从上方参考图添加，或直接上传/输入URL。<br>
                 🖱️ <strong>点击生成的图片</strong>可放大预览，按 ESC 或点击背景关闭。
             </div>
 
