@@ -58,6 +58,64 @@
 | 第三方转发 | `https://api.bltcy.ai/v1` | 国内可用 |
 | 本地部署 | `http://localhost:11434/v1` | Ollama等 |
 
+## 🔍 技术栈分析
+
+从仓库结构和源码实现来看，这个工程采用的是“**原生前端 + Node.js 本地代理 + Upscayl 独立放大服务**”的组合方案，整体偏轻量，不依赖前端打包器。
+
+### 1. 前端技术
+
+- **HTML5**：主入口是 `storyboard-generator-modular.html`
+- **CSS3**：样式文件位于 `css/storyboard-generator.css`、`css/task-queue.css`
+- **原生 JavaScript（Vanilla JS）**：核心逻辑拆分在 `js/` 目录下，以多个脚本模块协作完成
+- **浏览器存储**：
+  - `localStorage`：保存 API Key、URL、用户设置
+  - `IndexedDB`：保存分镜、历史记录、任务数据
+- **第三方前端库**：
+  - `JSZip`：通过 CDN 引入，用于批量下载和 ZIP 打包
+
+### 2. 后端与本地服务
+
+- **Node.js**：用于运行本地代理服务 `proxy-server.js`
+- **Node 原生模块**：
+  - `http` / `https`：转发 API 请求
+  - `fs` / `path`：读写本地文件与路径处理
+  - `child_process`：调用 Upscayl 可执行程序
+- **Express.js**：`upscayl-api/server.js` 中用于提供图片放大 API
+- **Multer**：处理图片上传
+- **CORS**：解决跨域访问
+- **UUID**：用于任务或文件唯一标识
+
+### 3. AI 与多媒体能力
+
+- **Google Gemini 多模态模型**：用于分析参考图并生成分镜描述
+- **OpenAI 兼容接口**：用于接入文生图、图生视频等模型
+- **视频模型接入**：
+  - Sora 2 / Sora 2 Pro
+  - Veo 3.1 / Veo 3.1 Pro
+  - Veo 3.1 Components
+- **Upscayl**：本地图片超分辨率放大引擎，支持多种 4x 模型
+
+### 4. 前端架构特点
+
+- **单页应用形态（SPA）**：页面入口集中在一个 HTML 中，交互逻辑由多个 JS 文件组织
+- **按功能拆分模块**：
+  - `js/api.js`：API 请求与代理检测
+  - `js/main.js`：初始化入口
+  - `js/image-generation.js`：AI 文生图
+  - `js/task-queue.js`：任务队列
+  - `js/split/`：九宫格拆分与下载
+  - `js/video/`：视频分镜与视频生成
+- **无前端框架、无构建步骤**：适合直接双击 HTML 启动，也便于本地快速部署
+
+### 5. 工程特点总结
+
+这个项目的技术选型重点是：
+
+1. **尽量降低使用门槛**：前端无需编译，直接打开 HTML 即可运行  
+2. **用本地代理解决网络与跨域问题**：提高 API 兼容性  
+3. **把 AI 能力拆成多个业务模块**：分镜、文生图、拆图、放大、视频生成彼此独立  
+4. **兼顾桌面本地工作流**：尤其适合需要本地放大、批处理和断点续传的创作场景
+
 ## 📁 项目结构
 
 ```
